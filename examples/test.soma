@@ -1,0 +1,15 @@
+# test.soma
+x = 10
+y = 20
+print("x + y =", x + y)
+
+square = \n -> n * n
+result = square(7)
+print("7^2 =", result)
+
+# Conditional
+if x then print("OK") else print("FAIL")
+
+# Lambda closure
+adder = \a -> \b -> a + b
+print("5 + 3 =", adder(5)(3))
