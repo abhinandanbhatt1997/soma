@@ -1,43 +1,69 @@
 # soma/evaluator.py
 
+class Environment:
+    """
+    Lexical scoped environment with parent chaining.
+    """
+    def __init__(self, parent=None):
+        self.vars = {}
+        self.parent = parent
+
+    def get(self, name):
+        if name in self.vars:
+            return self.vars[name]
+        if self.parent is not None:
+            return self.parent.get(name)
+        raise NameError(f"Undefined variable: '{name}'")
+
+    def set(self, name, value):
+        self.vars[name] = value
+
+
 class Evaluator:
     def __init__(self):
         self.builtins = {
             "print": self._builtin_print,
         }
+        self.global_env = Environment()
+        for name, fn in self.builtins.items():
+            self.global_env.set(name, fn)
 
     def _builtin_print(self, *args):
         print(*args)
         return None
 
     def eval(self, ast):
-        global_env = dict(self.builtins)
         result = None
         for stmt in ast:
-            result = self.eval_stmt(stmt, global_env)
+            result = self.eval_stmt(stmt, self.global_env)
         return result
 
     def eval_stmt(self, stmt, env):
         tag = stmt[0]
+
         if tag == "assign":
             _, name, expr = stmt
             value = self.eval_expr(expr, env)
-            env[name] = value
-            return None  # ← No output for assignments
+            env.set(name, value)
+            return None
+
         elif tag == "expr":
             return self.eval_expr(stmt[1], env)
+
         else:
             raise RuntimeError(f"Unknown statement: {tag}")
 
     def eval_expr(self, expr, env):
-        # Literals: number, string
+        # literals
         if isinstance(expr, (int, float, str)):
             return expr
 
-        # Variable names (e.g., "print", "x")
+        # variable lookup
         if isinstance(expr, str):
-            if expr in env:
-                return env[expr]
+            try:
+                return env.get(expr)
+            except NameError:
+                pass
             if expr in self.builtins:
                 return self.builtins[expr]
             raise NameError(f"Undefined variable: {expr}")
@@ -49,47 +75,47 @@ class Evaluator:
 
         if tag == "var":
             name = expr[1]
-            if name in env:
-                return env[name]
+            try:
+                return env.get(name)
+            except NameError:
+                pass
             if name in self.builtins:
                 return self.builtins[name]
             raise NameError(f"Undefined variable: {name}")
 
         elif tag == "bin":
             _, op, left, right = expr
-            lval = self.eval_expr(left, env)
-            rval = self.eval_expr(right, env)
-            if op == "PLUS": return lval + rval
-            if op == "MINUS": return lval - rval
-            if op == "MUL": return lval * rval
-            if op == "DIV": return lval / rval
+            l = self.eval_expr(left, env)
+            r = self.eval_expr(right, env)
+            if op == "PLUS": return l + r
+            if op == "MINUS": return l - r
+            if op == "MUL": return l * r
+            if op == "DIV": return l / r
             raise ValueError(f"Unknown operator: {op}")
 
         elif tag == "call":
             _, func_node, args = expr
             func = self.eval_expr(func_node, env)
             if not callable(func):
-                raise TypeError(f"Object {func} is not callable")
-            arg_vals = [self.eval_expr(arg, env) for arg in args]
+                raise TypeError(f"Object '{func}' is not callable")
+            arg_vals = [self.eval_expr(a, env) for a in args]
             return func(*arg_vals)
 
         elif tag == "if":
-            _, cond, then_branch, else_branch = expr
-            cond_val = self.eval_expr(cond, env)
-            if cond_val:
-                return self.eval_expr(then_branch, env)
-            else:
-                return self.eval_expr(else_branch, env)
+            _, cond, then_b, else_b = expr
+            if self.eval_expr(cond, env):
+                return self.eval_expr(then_b, env)
+            return self.eval_expr(else_b, env)
 
         elif tag == "lambda":
             _, arg_name, body = expr
-            def closure(*args):
-                if len(args) != 1:
-                    raise TypeError(f"Lambda takes exactly 1 argument, got {len(args)}")
-                new_env = {arg_name: args[0]}
-                full_env = {**env, **new_env}
-                return self.eval_expr(body, full_env)
+
+            def closure(arg_val):
+                local = Environment(parent=env)
+                local.set(arg_name, arg_val)
+                return self.eval_expr(body, local)
+
             return closure
 
         else:
-            raise RuntimeError(f"Unknown expression tag: {tag}")
+            raise RuntimeError(f"Unknown expr tag: {tag}")
