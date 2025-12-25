@@ -1,121 +1,105 @@
 # soma/evaluator.py
-
 class Environment:
-    """
-    Lexical scoped environment with parent chaining.
-    """
     def __init__(self, parent=None):
-        self.vars = {}
+        self.data = {}
         self.parent = parent
 
-    def get(self, name):
-        if name in self.vars:
-            return self.vars[name]
-        if self.parent is not None:
-            return self.parent.get(name)
-        raise NameError(f"Undefined variable: '{name}'")
+    def get(self, k):
+        if k in self.data:
+            return self.data[k]
+        if self.parent:
+            return self.parent.get(k)
+        raise NameError(k)
 
-    def set(self, name, value):
-        self.vars[name] = value
+    def set(self, k, v):
+        self.data[k] = v
 
+def eval_node(node, env):
+    kind = node[0]
 
-class Evaluator:
-    def __init__(self):
-        self.builtins = {
-            "print": self._builtin_print,
-        }
-        self.global_env = Environment()
-        for name, fn in self.builtins.items():
-            self.global_env.set(name, fn)
+    if kind == "program":
+        val = None
+        for s in node[1]:
+            val = eval_node(s, env)
+        return val
 
-    def _builtin_print(self, *args):
-        print(*args)
-        return None
+    if kind == "assign":
+        val = eval_node(node[2], env)
+        env.set(node[1], val)
+        return val
 
-    def eval(self, ast):
-        result = None
-        for stmt in ast:
-            result = self.eval_stmt(stmt, self.global_env)
-        return result
+    if kind == "expr":
+        return eval_node(node[1], env)
 
-    def eval_stmt(self, stmt, env):
-        tag = stmt[0]
+    if kind == "num":
+        return node[1]
 
-        if tag == "assign":
-            _, name, expr = stmt
-            value = self.eval_expr(expr, env)
-            env.set(name, value)
+    if kind == "str":
+        return node[1]
+
+    if kind == "var":
+        return env.get(node[1])
+
+    if kind == "list":
+        return [eval_node(x, env) for x in node[1]]
+
+    if kind == "map":
+        return {eval_node(k, env): eval_node(v, env) for k, v in node[1]}
+
+    if kind == "bin":
+        a = eval_node(node[2], env)
+        b = eval_node(node[3], env)
+        return {
+            "PLUS": a + b,
+            "MINUS": a - b,
+            "STAR": a * b,
+            "SLASH": a // b,
+        }[node[1]]
+
+    if kind == "call":
+        if node[1] == "print":
+            val = eval_node(node[2], env)
+            print(val)
+            return val
+        raise NameError(node[1])
+
+    if kind == "try":
+        try:
+            return eval_node(node[1], env)
+        except Exception as e:
+            new = Environment(env)
+            new.set(node[2], str(e))
+            return eval_node(node[3], new)
+
+    if kind == "match":
+        subj = eval_node(node[1], env)
+        for pat, body in node[2]:
+            res = match_pattern(pat, subj)
+            if res is not None:
+                new = Environment(env)
+                for k, v in res.items():
+                    new.set(k, v)
+                return eval_node(body, new)
+        raise ValueError("No match")
+
+    raise Exception(f"Unknown node {node}")
+
+def match_pattern(pat, val):
+    if pat[0] == "pat_any":
+        return {}
+
+    if pat[0] == "pat_lit":
+        return {} if pat[1] == val else None
+
+    if pat[0] == "pat_var":
+        return {pat[1]: val}
+
+    if pat[0] == "pat_empty":
+        return {} if val == [] else None
+
+    if pat[0] == "pat_cons":
+        if not val:
             return None
+        return {pat[1]: val[0], pat[2]: val[1:]}
 
-        elif tag == "expr":
-            return self.eval_expr(stmt[1], env)
-
-        else:
-            raise RuntimeError(f"Unknown statement: {tag}")
-
-    def eval_expr(self, expr, env):
-        # literals
-        if isinstance(expr, (int, float, str)):
-            return expr
-
-        # variable lookup
-        if isinstance(expr, str):
-            try:
-                return env.get(expr)
-            except NameError:
-                pass
-            if expr in self.builtins:
-                return self.builtins[expr]
-            raise NameError(f"Undefined variable: {expr}")
-
-        if not isinstance(expr, tuple):
-            raise RuntimeError(f"Invalid expression: {expr}")
-
-        tag = expr[0]
-
-        if tag == "var":
-            name = expr[1]
-            try:
-                return env.get(name)
-            except NameError:
-                pass
-            if name in self.builtins:
-                return self.builtins[name]
-            raise NameError(f"Undefined variable: {name}")
-
-        elif tag == "bin":
-            _, op, left, right = expr
-            l = self.eval_expr(left, env)
-            r = self.eval_expr(right, env)
-            if op == "PLUS": return l + r
-            if op == "MINUS": return l - r
-            if op == "MUL": return l * r
-            if op == "DIV": return l / r
-            raise ValueError(f"Unknown operator: {op}")
-
-        elif tag == "call":
-            _, func_node, args = expr
-            func = self.eval_expr(func_node, env)
-            if not callable(func):
-                raise TypeError(f"Object '{func}' is not callable")
-            arg_vals = [self.eval_expr(a, env) for a in args]
-            return func(*arg_vals)
-
-        elif tag == "if":
-            _, cond, then_b, else_b = expr
-            if self.eval_expr(cond, env):
-                return self.eval_expr(then_b, env)
-            return self.eval_expr(else_b, env)
-
-        elif tag == "lambda":
-            _, arg_name, body = expr
-
-            def closure(arg_val):
-                local = Environment(parent=env)
-                local.set(arg_name, arg_val)
-                return self.eval_expr(body, local)
-
-            return closure
-
-        else:
-            raise RuntimeError(f"Unknown expr tag: {tag}")
+    return None

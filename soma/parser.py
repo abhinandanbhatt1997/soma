@@ -1,118 +1,148 @@
-from soma.lexer import tokenize
-
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
         self.pos = 0
 
     def peek(self):
-        return self.tokens[self.pos] if self.pos < len(self.tokens) else ('EOF', None)
+        return self.tokens[self.pos]
 
-    def eat(self, kind):
-        tok = self.peek()
-        if tok[0] != kind:
-            raise SyntaxError(f"Expected {kind}, got {tok}")
+    def advance(self):
+        tok = self.tokens[self.pos]
         self.pos += 1
         return tok
 
+    def expect(self, kind):
+        tok = self.peek()
+        if tok[0] != kind:
+            raise SyntaxError(f"Expected {kind}, got {tok}")
+        return self.advance()
+
     def parse(self):
-        statements = []
-        while self.pos < len(self.tokens):
-            tok_type, tok_val = self.tokens[self.pos]
-            if tok_type == "NEWLINE":
-                self.pos += 1
-                continue
-            if tok_type == "EOF":
-                break
-            statements.append(self.statement())
-        return statements
+        stmts = []
+        while self.peek()[0] != "EOF":
+            stmts.append(self.statement())
+        return stmts
+
+    # ---------- statements ----------
 
     def statement(self):
-        if self.peek()[0] == 'IDENT' and self._lookahead_kind(1) == 'EQUAL':
-            name = self.eat('IDENT')[1]
-            self.eat('EQUAL')
-            value = self.expr()
-            return ("assign", name, value)
+        tok = self.peek()[0]
+
+        if tok == "LET":
+            return self.let_stmt()
+        if tok == "IF":
+            return self.if_stmt()
+        if tok == "WHILE":
+            return self.while_stmt()
+        if tok == "FN":
+            return self.fn_stmt()
+
         return ("expr", self.expr())
 
-    def _lookahead_kind(self, n):
-        if self.pos + n < len(self.tokens):
-            return self.tokens[self.pos + n][0]
-        return 'EOF'
+    def let_stmt(self):
+        self.expect("LET")
+        name = self.expect("IDENT")[1]
+        self.expect("EQUAL")
+        value = self.expr()
+        return ("let", name, value)
+
+    def if_stmt(self):
+        self.expect("IF")
+        cond = self.expr()
+        then_block = self.block()
+        else_block = None
+        if self.peek()[0] == "ELSE":
+            self.advance()
+            else_block = self.block()
+        return ("if", cond, then_block, else_block)
+
+    def while_stmt(self):
+        self.expect("WHILE")
+        cond = self.expr()
+        body = self.block()
+        return ("while", cond, body)
+
+    def fn_stmt(self):
+        self.expect("FN")
+        name = self.expect("IDENT")[1]
+        self.expect("LPAREN")
+
+        # parse arguments
+        args = []
+        if self.peek()[0] != "RPAREN":
+            while True:
+                args.append(self.expect("IDENT")[1])
+                if self.peek()[0] == "RPAREN":
+                    break
+                self.expect("COMMA")
+        self.expect("RPAREN")
+
+        body = self.block()
+        return ("fn", name, args, body)
+
+    def block(self):
+        self.expect("LBRACE")
+        stmts = []
+        while self.peek()[0] != "RBRACE":
+            stmts.append(self.statement())
+        self.expect("RBRACE")
+        return stmts
+
+    # ---------- expressions ----------
 
     def expr(self):
-        return self.if_expr()
+        return self.compare()
 
-    def if_expr(self):
-        if self.peek()[0] == 'IF':
-            self.eat('IF')
-            cond = self.expr()
-            self.eat('THEN')
-            then_branch = self.expr()
-            self.eat('ELSE')
-            else_branch = self.expr()
-            return ("if", cond, then_branch, else_branch)
-        return self.lambda_expr()
-
-    def lambda_expr(self):
-        if self.peek()[0] == 'LAMBDA':
-            self.eat('LAMBDA')
-            arg = self.eat('IDENT')[1]
-            self.eat('ARROW')
-            body = self.expr()
-            return ("lambda", arg, body)
-        return self.add()
+    def compare(self):
+        node = self.add()
+        while self.peek()[0] in ("GT", "LT", "EQEQ", "NOTEQ"):
+            op = self.advance()[0]
+            right = self.add()
+            node = (op, node, right)
+        return node
 
     def add(self):
         node = self.term()
-        while self.peek()[0] in ('PLUS', 'MINUS'):
-            op = self.eat(self.peek()[0])[0]
-            node2 = self.term()
-            node = ("bin", op, node, node2)
+        while self.peek()[0] in ("PLUS", "MINUS"):
+            op = self.advance()[0]
+            right = self.term()
+            node = (op, node, right)
         return node
 
     def term(self):
         node = self.factor()
-        while self.peek()[0] in ('MUL', 'DIV'):
-            op = self.eat(self.peek()[0])[0]
-            node2 = self.factor()
-            node = ("bin", op, node, node2)
+        while self.peek()[0] in ("STAR", "SLASH"):
+            op = self.advance()[0]
+            right = self.factor()
+            node = (op, node, right)
         return node
 
     def factor(self):
-        node = self.primary()
-
-        while self.peek()[0] == 'LPAREN':
-            self.eat('LPAREN')
-            args = []
-            if self.peek()[0] != 'RPAREN':
-                args.append(self.expr())
-                while self.peek()[0] == 'COMMA':
-                    self.eat('COMMA')
-                    args.append(self.expr())
-            self.eat('RPAREN')
-            node = ("call", node, args)
-
-        return node
-
-    def primary(self):
         tok = self.peek()
 
-        if tok[0] == 'NUMBER':
-            return self.eat('NUMBER')[1]
-        if tok[0] == 'STRING':
-            return self.eat('STRING')[1]
-        if tok[0] == 'IDENT':
-            return ("var", self.eat('IDENT')[1])
-        if tok[0] == 'LPAREN':
-            self.eat('LPAREN')
-            expr = self.expr()
-            self.eat('RPAREN')
-            return expr
-        if tok[0] == 'LAMBDA':
-            return self.lambda_expr()
-        if tok[0] == 'IF':
-            return self.if_expr()
-        if tok[0] == 'EOF':
-            raise SyntaxError(f"Unexpected end of input at pos {self.pos}")
-        raise SyntaxError(f"Unexpected token {tok} at pos {self.pos}")
+        if tok[0] == "NUMBER":
+            return ("number", self.advance()[1])
+
+        if tok[0] == "IDENT":
+            name = self.advance()[1]
+            # check for function call
+            if self.peek()[0] == "LPAREN":
+                self.advance()
+                args = []
+                if self.peek()[0] != "RPAREN":
+                    while True:
+                        args.append(self.expr())
+                        if self.peek()[0] == "RPAREN":
+                            break
+                        self.expect("COMMA")
+                self.expect("RPAREN")
+                return ("call", name, args)
+            return ("var", name)
+
+        if tok[0] == "LPAREN":
+            self.advance()
+            node = self.expr()
+            self.expect("RPAREN")
+            return node
+
+        raise SyntaxError(f"Unexpected token {tok}")

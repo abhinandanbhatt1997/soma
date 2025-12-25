@@ -1,57 +1,56 @@
-# soma/lexer.py
-
 import re
 
-TOKEN_SPEC = [
-    ("COMMENT", r"#.*"),
-    ("STRING", r'"(?:[^"\\]|\\.)*"'),  # String literals
-    ("NUMBER", r"\d+"),
-    ("IDENT",  r"[a-zA-Z_][a-zA-Z0-9_]*"),
-    ("LAMBDA", r"\\"),
-    ("ARROW",  r"->"),
-    ("EQUAL",  r"="),
-    ("PLUS",   r"\+"),
-    ("MINUS",  r"-"),
-    ("MUL",    r"\*"),
-    ("DIV",    r"/"),
-    ("LPAREN", r"\("),
-    ("RPAREN", r"\)"),
-    ("COMMA",  r","),
-    ("NEWLINE",r"\n"),
-    ("SKIP",   r"[ \t]+"),
-    ("MISMATCH", r"."),
-]
+class Lexer:
+    def __init__(self, source):
+        self.source = source
 
-MASTER = re.compile("|".join(f"(?P<{name}>{pattern})" for name, pattern in TOKEN_SPEC))
+    def tokenize(self):
+        TOKEN_SPEC = [
+            ("NUMBER",   r"\d+"),
+            ("LET",      r"let\b"),
+            ("IF",       r"if\b"),
+            ("ELSE",     r"else\b"),
+            ("WHILE",    r"while\b"),
+            ("FN",       r"fn\b"),
+            ("EQEQ",     r"=="),
+            ("NOTEQ",    r"!="),
+            ("GT",       r">"),
+            ("LT",       r"<"),
+            ("IDENT",    r"[a-zA-Z_]\w*"),
+            ("PLUS",     r"\+"),
+            ("MINUS",    r"-"),
+            ("STAR",     r"\*"),
+            ("SLASH",    r"/"),
+            ("EQUAL",    r"="),
+            ("LPAREN",   r"\("),
+            ("RPAREN",   r"\)"),
+            ("LBRACE",   r"\{"),
+            ("RBRACE",   r"\}"),
+            ("COMMA",    r","),
+            ("NEWLINE",  r"\n"),
+            ("SKIP",     r"[ \t]+"),
+            ("MISMATCH", r"."),
+        ]
 
-def tokenize(code):
-    tokens = []
-    KEYWORDS = {"if": "IF", "then": "THEN", "else": "ELSE"}
+        tokens = []
+        regex = "|".join(f"(?P<{n}>{p})" for n, p in TOKEN_SPEC)
 
-    for m in MASTER.finditer(code):
-        kind = m.lastgroup
-        value = m.group()
+        for m in re.finditer(regex, self.source):
+            kind = m.lastgroup
+            value = m.group()
+            if kind == "NUMBER":
+                tokens.append(("NUMBER", int(value)))
+            elif kind in {
+                "LET","IF","ELSE","WHILE","FN","IDENT",
+                "PLUS","MINUS","STAR","SLASH",
+                "EQUAL","EQEQ","NOTEQ","GT","LT",
+                "LPAREN","RPAREN","LBRACE","RBRACE","COMMA"
+            }:
+                tokens.append((kind, value))
+            elif kind in ("NEWLINE", "SKIP"):
+                continue
+            else:
+                raise SyntaxError(f"Illegal character {value}")
 
-        if kind == "NUMBER":
-            tokens.append(("NUMBER", int(value)))
-        elif kind == "STRING":
-            # Strip quotes and handle simple escapes
-            unquoted = value[1:-1]
-            unquoted = unquoted.replace('\\"', '"')
-            tokens.append(("STRING", unquoted))
-        elif kind == "IDENT":
-            token_type = KEYWORDS.get(value, "IDENT")
-            tokens.append((token_type, value))
-        elif kind == "SKIP":
-            continue
-        elif kind == "NEWLINE":
-            tokens.append(("NEWLINE", None))
-        elif kind == "COMMENT":
-            continue
-        elif kind == "MISMATCH":
-            raise SyntaxError(f"Illegal char {value}")
-        else:
-            tokens.append((kind, value))
-
-    tokens.append(("EOF", None))
-    return tokens
+        tokens.append(("EOF", None))
+        return tokens

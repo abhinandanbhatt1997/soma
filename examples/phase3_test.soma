@@ -1,0 +1,14 @@
+let x = 3
+
+if x > 2 {
+    let y = x * 5
+    y
+} else {
+    0
+}
+
+while x < 6 {
+    let x = x + 1
+}
+
+x
